@@ -4,7 +4,7 @@ pelican-cite
 ==============
 
 A Pelican plugin that provices a BibTeX-style reference system within
-pelican sites. 
+pelican sites.
 
 Based on teh Pelican BibTeX plugin written by Vlad Niculae <vlad@vene.ro>
 """
@@ -29,19 +29,20 @@ from pelican.generators import ArticlesGenerator, PagesGenerator
 from .author_year import LabelStyle
 
 if sys.version_info[0] < 3:
-    reload(sys)  
+    reload(sys)
     sys.setdefaultencoding('utf8')
 
 __version__ = '0.2.0'
 
 JUMP_BACK = '<a class="cite-backref" href="#ref-{0}-{1}" title="Jump back to reference {1}">{2}</a>'
 CITE_RE = re.compile("\[&#64;(&#64;)?\s*(\w.*?)\s*\]")
+BIB_RE = re.compile(r'\{%\s*BIBLIOGRAPHY\s+(\S*?)\s*%\}')
 
 class Style(UnsrtStyle):
     name = 'inline'
     default_sorting_style = 'author_year_title'
     default_label_style = 'author_year'
-    
+
     def __init__(self, label_style=None, name_style=None, sorting_style=None, abbreviate_names=False, **kwargs):
         self.name_style = find_plugin('pybtex.style.names', name_style or self.default_name_style)()
         self.label_style = LabelStyle()
@@ -101,16 +102,28 @@ def process_content(article):
         else:
             cite_count[citation[1]] += 1
 
+    # if {% BIBLIOGRAPHY <GROUPNAME> %} is used, then add citations with
+    # <GROUPNAME> to the citation list
+    bibmatch = BIB_RE.findall(content)
+    if bibmatch:
+        for key in data.entries.keys():
+            if bibmatch[0] in [s.strip() for s in data.entries[key].fields['groups'].split(',')]:
+                if key not in cite_count:
+                    cite_count[key] = 0
     # Get formatted entries for the appropriate bibliographic entries
     cited = []
+
     for key in data.entries.keys():
         if key in cite_count: cited.append(data.entries[key])
-    if len(cited) == 0: return
+    if len(cited) == 0:
+        content = BIB_RE.sub('', content)
+        article._content = content
+        return
     formatted_entries = style.format_entries(cited)
 
     # Get the data for the required citations and append to content
     labels = {}
-    content += '<hr>\n<h2>Bibliography</h2>\n'
+    text = '<ul class="publications">'
     for formatted_entry in formatted_entries:
         key = formatted_entry.key
         ref_id = key.replace(' ','')
@@ -121,7 +134,7 @@ def process_content(article):
         t = t.replace('\\}', '&#125;')
         t = t.replace('{', '')
         t = t.replace('}', '')
-        text = ("<p id='" + ref_id + "'>" + t)
+        text += ("<li id='" + ref_id + "'>" + t)
         for i in range(cite_count[key]):
             if i == 0:
                 text += ' ' + JUMP_BACK.format(ref_id,1,'↩')
@@ -129,9 +142,16 @@ def process_content(article):
                     text += JUMP_BACK.format(ref_id,1,' <sup>1</sup> ')
             else:
                 text += JUMP_BACK.format(ref_id,i+1,'<sup>'+str(i+1)+'</sup> ')
-        text += '</p>'
-        content += text + '\n'
+        text += '</li>\n'
+        #content += text + '\n'
         labels[key] = label
+    text += '</ul>'
+
+    if BIB_RE.findall(content):
+        content = BIB_RE.sub(text, content)
+    else:
+        content += '<hr />\n<h2>Bibliography</h2>\n'
+        content += text
 
     # Replace citations in article/page
     cite_count = {}
@@ -153,10 +173,10 @@ def process_content(article):
         else:
             logger.warn('No BibTeX entry found for key "{}"'.format(label))
             return match.group(0)
-    
+
     content = CITE_RE.sub(replace_cites,content)
     article._content = content
-    
+
 
 def add_citations(generators):
     global global_bib
